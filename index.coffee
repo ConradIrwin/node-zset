@@ -132,6 +132,6 @@ class ZSet
     "#{@name}:#{key}"
 
   membersKey: (cardinality) ->
-    "#{@name}.#{parseInt(cardinality / @membersPerBucket)}"
+    "#{@name}.#{Math.floor(cardinality / @membersPerBucket)}"
 
 module.exports = ZSet
