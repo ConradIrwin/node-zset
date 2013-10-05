@@ -1,0 +1,16 @@
+{
+    "name": "zset",
+    "version": "0.1.0",
+    "description": "Disk backed semi-sorted sets (using GDBM)",
+    "repository": "https://github.com/ConradIrwin/zset",
+    "dependencies": {
+        "coffee-script": "x.x.x",
+        "gdbm": "x.x.x"
+    },
+    "devDependencies": {
+        "mocha": "x.x.x"
+    },
+    "scripts": {
+        "test": "mocha test --compilers coffee:coffee-script"
+    }
+}
