@@ -29,12 +29,13 @@ class ZSet
     if !summary # new set!
       cardinality = 1
       total = 1
+      topN = 1
 
-      @db.store(@summaryKey(), @serializeSummary(total, cardinality, @datum(newScore, key)))
+      @db.store(@summaryKey(), @serializeSummary(total, cardinality, topN, @datum(newScore, key)))
       @db.store(@membersKey(cardinality), key)
       return
 
-    [total, cardinality, topN] = @parseSummary(summary)
+    [total, cardinality, topN, top] = @parseSummary(summary)
 
     total += 1
     if isNew
@@ -47,12 +48,12 @@ class ZSet
 
       @db.store(@membersKey(cardinality), members)
 
-    minimum = @numberify(topN.substr(0, 8))
-    if newScore < minimum
-      @db.store(@summaryKey(), @serializeSummary(total, cardinality, topN))
+    minimum = @numberify(top.substr(0, 8))
+    if newScore < minimum && topN == @summarySize
+      @db.store(@summaryKey(), @serializeSummary(total, cardinality, topN, top))
 
     else
-      parsed = topN.split("\x00")
+      parsed = top.split("\x00")
       updated = false
 
       parsed = parsed.map (datum) =>
@@ -66,13 +67,15 @@ class ZSet
 
       parsed.sort()
       parsed = parsed.slice(-@summarySize) if parsed.length > @summarySize
-      @db.store(@summaryKey(), @serializeSummary(total, cardinality, parsed.join("\x00")))
+      @db.store(@summaryKey(), @serializeSummary(total, cardinality, parsed.length, parsed.join("\x00")))
 
   score: (key) ->
     @numberify @db.fetch(@scoreKey(key))
 
   summary: () ->
-    [total, cardinality, topN] = @parseSummary(@db.fetch(@summaryKey()))
+    summary = @db.fetch(@summaryKey())
+    return {"total": 0, "cardinality": 0, "top": {}} unless summary
+    [total, cardinality, topN, top] = @parseSummary(summary)
 
     output = {
       "total": total,
@@ -80,7 +83,7 @@ class ZSet
       "top": {}
     }
 
-    topN.split("\x00").forEach (datum) =>
+    top.split("\x00").forEach (datum) =>
       output.top[datum.substr(8)] = @numberify(datum.substr(0, 8))
 
     output
@@ -95,16 +98,23 @@ class ZSet
     members
 
   total: () ->
-    @parseTotal(@db.fetch(@summaryKey()))
+    summary = @db.fetch(@summaryKey())
+    return 0 unless summary
+    @parseTotal(summary)
 
   cardinality: () ->
-    @parseCardinality(@db.fetch(@summaryKey()))
+    summary = @db.fetch(@summaryKey())
+    return 0 unless summary
+    @parseCardinality(summary)
 
-  topN: () ->
+  top: () ->
     @summary().top
 
   parseSummary: (summary) ->
-    [@parseTotal(summary), @parseCardinality(summary), summary.substr(16)]
+    [@parseTotal(summary),
+     @parseCardinality(summary),
+     @parseTopN(summary),
+     summary.substr(24)]
 
   parseTotal: (summary) ->
     @numberify summary.substr(0, 8)
@@ -112,8 +122,11 @@ class ZSet
   parseCardinality: (summary) ->
     @numberify summary.substr(8, 8)
 
-  serializeSummary: (total, cardinality, topN) ->
-    return @stringify(total) + @stringify(cardinality) + topN
+  parseTopN: (summary) ->
+    @numberify summary.substr(16, 8)
+
+  serializeSummary: (total, cardinality, topN, top) ->
+    return @stringify(total) + @stringify(cardinality) + @stringify(topN) + top
 
   stringify: (n) ->
     str = n.toString(16)

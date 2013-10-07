@@ -37,6 +37,23 @@ describe "zset", ->
         }
       })
 
+  describe "edge cases", ->
+
+    it "should include a new member in the topN if there's room", ->
+      zset = new ZSet(db, "gromit")
+      zset.incr("one")
+      zset.incr("one")
+      zset.incr("two")
+
+      assert.deepEqual zset.summary(), {
+        "total": 3,
+        "cardinality": 2,
+        "top": {
+          "one": 2,
+          "two": 1
+        }
+      }
+
   describe "utilized", ->
 
     zset = new ZSet(db, "example2", 5, 10)
