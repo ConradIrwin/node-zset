@@ -1,16 +1,17 @@
 {
-    "name": "zset",
-    "version": "0.2.0",
-    "description": "Disk backed semi-sorted sets (using GDBM)",
-    "repository": "https://github.com/ConradIrwin/zset",
-    "dependencies": {
-        "coffee-script": "x.x.x",
-        "gdbm": "x.x.x"
-    },
-    "devDependencies": {
-        "mocha": "x.x.x"
-    },
-    "scripts": {
-        "test": "mocha test --compilers coffee:coffee-script"
-    }
+  "name": "zset",
+  "version": "0.2.0",
+  "description": "Disk backed semi-sorted sets (using GDBM)",
+  "repository": "https://github.com/ConradIrwin/zset",
+  "dependencies": {
+    "coffee-script": "x.x.x",
+    "gdbm": "x.x.x",
+    "kyoto": "git+https://github.com/m4c0/node-kyoto"
+  },
+  "devDependencies": {
+    "mocha": "x.x.x"
+  },
+  "scripts": {
+    "test": "mocha test --compilers coffee:coffee-script"
+  }
 }

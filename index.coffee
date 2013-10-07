@@ -16,61 +16,64 @@ class ZSet
 
   constructor: (@db, @name, @summarySize=10, @membersPerBucket=500) ->
 
-  incr: (key) ->
+  incr: (key, cb) ->
     key = key.toString()
-    summary = @db.fetch(@summaryKey())
-    score = @score(key)
-    isNew = score == 0
+    @db.fetch @summaryKey(), (summary) =>
+      @score key, (score) =>
 
-    newScore = score + 1
+        isNew = score == 0
 
-    @db.store(@scoreKey(key), @stringify(newScore))
+        newScore = score + 1
 
-    if !summary # new set!
-      cardinality = 1
-      total = 1
-      topN = 1
+        @db.store(@scoreKey(key), @stringify(newScore))
 
-      @db.store(@summaryKey(), @serializeSummary(total, cardinality, topN, @datum(newScore, key)))
-      @db.store(@membersKey(cardinality), key)
-      return
+        if !summary # new set!
+          cardinality = 1
+          total = 1
+          topN = 1
 
-    [total, cardinality, topN, top] = @parseSummary(summary)
+          @db.store(@membersKey(cardinality), key)
+          @db.store(@summaryKey(), @serializeSummary(total, cardinality, topN, @datum(newScore, key)), cb)
+          return
 
-    total += 1
-    if isNew
-      cardinality += 1
-      members = @db.fetch(@membersKey(cardinality))
-      if members
-        members += "\x00#{key}"
-      else
-        members = key
+        [total, cardinality, topN, top] = @parseSummary(summary)
 
-      @db.store(@membersKey(cardinality), members)
+        total += 1
+        if isNew
+          cardinality += 1
+          @db.fetch @membersKey(cardinality), (members) =>
+            members = @db.fetch(@membersKey(cardinality))
+            if members
+              members += "\x00#{key}"
+            else
+              members = key
 
-    minimum = @numberify(top.substr(0, 8))
-    if newScore < minimum && topN == @summarySize
-      @db.store(@summaryKey(), @serializeSummary(total, cardinality, topN, top))
+            @db.store(@membersKey(cardinality), members)
 
-    else
-      parsed = top.split("\x00")
-      updated = false
+        minimum = @numberify(top.substr(0, 8))
+        if newScore < minimum && topN == @summarySize
+          @db.store(@summaryKey(), @serializeSummary(total, cardinality, topN, top), cb)
 
-      parsed = parsed.map (datum) =>
-        if key == datum.substr(8)
-          updated = true
-          @datum(newScore, key)
         else
-          datum
+          parsed = top.split("\x00")
+          updated = false
 
-      parsed.push(@datum(newScore, key)) unless updated
+          parsed = parsed.map (datum) =>
+            if key == datum.substr(8)
+              updated = true
+              @datum(newScore, key)
+            else
+              datum
 
-      parsed.sort()
-      parsed = parsed.slice(-@summarySize) if parsed.length > @summarySize
-      @db.store(@summaryKey(), @serializeSummary(total, cardinality, parsed.length, parsed.join("\x00")))
+          parsed.push(@datum(newScore, key)) unless updated
 
-  score: (key) ->
-    @numberify @db.fetch(@scoreKey(key))
+          parsed.sort()
+          parsed = parsed.slice(-@summarySize) if parsed.length > @summarySize
+          @db.store(@summaryKey(), @serializeSummary(total, cardinality, parsed.length, parsed.join("\x00")), cb)
+
+  score: (key, cb) ->
+    @db.fetch @scoreKey(key), (value) =>
+      cb @numberify value
 
   summary: () ->
     summary = @db.fetch(@summaryKey())
