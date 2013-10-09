@@ -3,6 +3,8 @@ ZSet = require './index'
 
 k = kyoto.open "/tmp/zset.kct", kyoto.OWRITER | kyoto.OCREATE, ->
 
+  process.on 'exit', -> k.closeSync()
+
   db = {
     fetch: (key, cb) ->
       k.get key, cb
@@ -17,7 +19,7 @@ k = kyoto.open "/tmp/zset.kct", kyoto.OWRITER | kyoto.OCREATE, ->
   aloop((cb) ->
     batch = new Date()
     aloop((cb) ->
-      zset = new ZSet(db,  "this is about an id:and maybe another id:#{rand(10000).to_s}")
+      zset = new ZSet(k,  "this is about an id:and maybe another id:#{rand(10000)}")
       zset.incr "value #{rand(100)}", cb
     , 10000, ->
       console.log(10000 * 1000 / (new Date() - batch))

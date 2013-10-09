@@ -18,136 +18,71 @@ class ZSet
 
   incr: (key, cb) ->
     key = key.toString()
-    @db.fetch @summaryKey(), (summary) =>
-      @score key, (score) =>
 
-        isNew = score == 0
+    @db.increment @totalKey(), 1, 0, (err, newTotal) =>
+      return cb(err) if err
+      @db.increment @scoreKey(key), 1, 0, (err, newScore) =>
+        return cb(err) if err
+        isNew = (newScore == 1)
 
-        newScore = score + 1
+        @db.set @orderKey(key, newScore), "1", (err) =>
+          return cb(err) if err
 
-        @db.store(@scoreKey(key), @stringify(newScore))
-
-        if !summary # new set!
-          cardinality = 1
-          total = 1
-          topN = 1
-
-          @db.store(@membersKey(cardinality), key)
-          @db.store(@summaryKey(), @serializeSummary(total, cardinality, topN, @datum(newScore, key)), cb)
-          return
-
-        [total, cardinality, topN, top] = @parseSummary(summary)
-
-        total += 1
-        if isNew
-          cardinality += 1
-          @db.fetch @membersKey(cardinality), (members) =>
-            members = @db.fetch(@membersKey(cardinality))
-            if members
-              members += "\x00#{key}"
-            else
-              members = key
-
-            @db.store(@membersKey(cardinality), members)
-
-        minimum = @numberify(top.substr(0, 8))
-        if newScore < minimum && topN == @summarySize
-          @db.store(@summaryKey(), @serializeSummary(total, cardinality, topN, top), cb)
-
-        else
-          parsed = top.split("\x00")
-          updated = false
-
-          parsed = parsed.map (datum) =>
-            if key == datum.substr(8)
-              updated = true
-              @datum(newScore, key)
-            else
-              datum
-
-          parsed.push(@datum(newScore, key)) unless updated
-
-          parsed.sort()
-          parsed = parsed.slice(-@summarySize) if parsed.length > @summarySize
-          @db.store(@summaryKey(), @serializeSummary(total, cardinality, parsed.length, parsed.join("\x00")), cb)
+          if isNew
+            @db.increment @cardinalityKey(), 1, 0, (err, newCardinality) =>
+              return cb(err) if err
+              cb()
+          else
+            @db.remove @orderKey(key, newScore - 1), (err) =>
+              return cb(err) if err
+              cb()
 
   score: (key, cb) ->
-    @db.fetch @scoreKey(key), (value) =>
-      cb @numberify value
+    @db.getInt @scoreKey(key), cb
 
-  summary: () ->
-    summary = @db.fetch(@summaryKey())
-    return {"total": 0, "cardinality": 0, "top": {}} unless summary
-    [total, cardinality, topN, top] = @parseSummary(summary)
+  total: (cb) ->
+    @db.getInt @totalKey(), cb
 
-    output = {
-      "total": total,
-      "cardinality": cardinality,
-      "top": {}
-    }
+  cardinality: (cb) ->
+    @db.getInt @cardinalityKey(), cb
 
-    top.split("\x00").forEach (datum) =>
-      output.top[datum.substr(8)] = @numberify(datum.substr(0, 8))
+  top: (n, cb) ->
+    @db.matchPrefix @orderKeyPrefix(), n, (err, keys) =>
+      return cb(err) if err
+      ret = {}
+      keys.forEach (key) =>
+        ret[key.substr(@orderKeyPrefix().length + 8)] = @parseSortable(key.substr(@orderKeyPrefix().length, 8), 16)
 
-    output
+      cb null, ret
 
-  members: () ->
-    members = []
-    i = 1
-    while more = @db.fetch(@membersKey(i))
-      members = members.concat(more.split("\x00"))
-      i += @membersPerBucket
-
-    members
-
-  total: () ->
-    summary = @db.fetch(@summaryKey())
-    return 0 unless summary
-    @parseTotal(summary)
-
-  cardinality: () ->
-    summary = @db.fetch(@summaryKey())
-    return 0 unless summary
-    @parseCardinality(summary)
-
-  top: () ->
-    @summary().top
-
-  parseSummary: (summary) ->
-    [@parseTotal(summary),
-     @parseCardinality(summary),
-     @parseTopN(summary),
-     summary.substr(24)]
-
-  parseTotal: (summary) ->
-    @numberify summary.substr(0, 8)
-
-  parseCardinality: (summary) ->
-    @numberify summary.substr(8, 8)
-
-  parseTopN: (summary) ->
-    @numberify summary.substr(16, 8)
-
-  serializeSummary: (total, cardinality, topN, top) ->
-    return @stringify(total) + @stringify(cardinality) + @stringify(topN) + top
-
-  stringify: (n) ->
-    str = n.toString(16)
-    "00000000".substr(0, 8 - str.length) + str
-
-  numberify: (s) ->
-    parseInt(s || 0, 16)
-
-  datum: (score, key) ->
-    @stringify(score) + key
-
-  summaryKey: ->
-    @name
+  members: (n, cb) ->
+    @db.matchPrefix @scoreKeyPrefix(), n, (err, keys) =>
+      return cb(err) if err
+      cb null, keys.map (key) => key.substr(@scoreKeyPrefix().length)
 
   scoreKey: (key) ->
     "#{@name}:#{key}"
 
-  membersKey: (cardinality) ->
-    "#{@name}.#{Math.floor(cardinality / @membersPerBucket)}"
+  scoreKeyPrefix: () ->
+    "#{@name}:"
+
+  orderKey: (key, score) ->
+    "#{@name}.#{@sortable(score)}#{key}"
+
+  orderKeyPrefix: () ->
+    "#{@name}."
+
+  totalKey: (key) ->
+    "#{@name}@total"
+
+  cardinalityKey: (key) ->
+    "#{@name}@cardinality"
+
+  sortable: (number) ->
+    str = (Math.pow(2, 32) - number).toString(16)
+    "00000000".substr(0, 8 - str.length) + str
+
+  parseSortable: (string) ->
+    Math.pow(2, 32) - parseInt(string, 16)
 
 module.exports = ZSet
