@@ -1,16 +1,11 @@
 assert = require("assert")
 ZSet = require("../index")
 kyoto = require("kyoto")
+leveled = require("leveled")
 
 describe "zset", ->
 
-  db = null
-  before (next) ->
-    db = kyoto.open "test.kct", kyoto.OWRITER | kyoto.OCREATE | kyoto.OTRUNCATE, ->
-      next()
-
-  after ->
-    db.closeSync()
+  db = leveled("/tmp/aaa.db")
 
   describe "basics", ->
     zset = null

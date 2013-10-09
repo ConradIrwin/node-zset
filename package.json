@@ -5,7 +5,8 @@
   "repository": "https://github.com/ConradIrwin/zset",
   "dependencies": {
     "coffee-script": "x.x.x",
-    "kyoto": "git+https://github.com/ConradIrwin/node-kyoto"
+    "kyoto": "git+https://github.com/ConradIrwin/node-kyoto",
+    "leveled": "~0.4.4"
   },
   "devDependencies": {
     "mocha": "x.x.x"

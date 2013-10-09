@@ -33,53 +33,53 @@ class ZSet
 
   _incr: (key, cb) ->
     key = key.toString()
-    @db.getBulk [@summaryKey(), @scoreKey(key)], (err, result) =>
-      return cb(err) if err
+    @db.get @summaryKey(), (err, summary) =>
+      return cb(err) if err && err != "NotFound: "
+      @db.get @scoreKey(key), (err, score) =>
+        return cb(err) if err && err != "NotFound: "
 
+        score = @numberify score
 
-      summary = result[@summaryKey()]
-      score = @numberify result[@scoreKey(key)]
+        isNew = score == 0
+        newScore = score + 1
 
-      isNew = score == 0
-      newScore = score + 1
-
-      if !summary # new set!
-        cardinality = 1
-        total = 1
-        topN = 1
-        newSummary = @serializeSummary(total, cardinality, topN, @datum(newScore, key))
-
-      else
-        [total, cardinality, topN, top] = @parseSummary(summary)
-
-        total += 1
-        cardinality += 1 if isNew
-
-        minimum = @numberify(top.substr(0, 8))
-        if newScore < minimum && topN == @summarySize
-          newSummary = @serializeSummary(total, cardinality, topN, top)
+        if !summary # new set!
+          cardinality = 1
+          total = 1
+          topN = 1
+          newSummary = @serializeSummary(total, cardinality, topN, @datum(newScore, key))
 
         else
-          parsed = top.split("\x00")
-          updated = false
+          [total, cardinality, topN, top] = @parseSummary(summary)
 
-          parsed = parsed.map (datum) =>
-            if key == datum.substr(8)
-              updated = true
-              @datum(newScore, key)
-            else
-              datum
+          total += 1
+          cardinality += 1 if isNew
 
-          parsed.push(@datum(newScore, key)) unless updated
+          minimum = @numberify(top.substr(0, 8))
+          if newScore < minimum && topN == @summarySize
+            newSummary = @serializeSummary(total, cardinality, topN, top)
 
-          parsed.sort()
-          parsed = parsed.slice(-@summarySize) if parsed.length > @summarySize
-          newSummary = @serializeSummary(total, cardinality, parsed.length, parsed.join("\x00"))
+          else
+            parsed = top.split("\x01")
+            updated = false
 
-      toSet = {}
-      toSet[@summaryKey()] = newSummary
-      toSet[@scoreKey(key)] = @stringify newScore
-      @db.setBulk toSet, cb
+            parsed = parsed.map (datum) =>
+              if key == datum.substr(8)
+                updated = true
+                @datum(newScore, key)
+              else
+                datum
+
+            parsed.push(@datum(newScore, key)) unless updated
+
+            parsed.sort()
+            parsed = parsed.slice(-@summarySize) if parsed.length > @summarySize
+            newSummary = @serializeSummary(total, cardinality, parsed.length, parsed.join("\x01"))
+
+        @db.batch()
+          .put(@summaryKey(), newSummary)
+          .put(@scoreKey(key), @stringify newScore)
+          .write(cb)
 
   score: (key, cb) ->
     @db.get @scoreKey(key), (err, value) =>
@@ -97,15 +97,15 @@ class ZSet
       "top": {}
     }
 
-    top.split("\x00").forEach (datum) =>
+    top.split("\x01").forEach (datum) =>
       output.top[datum.substr(8)] = @numberify(datum.substr(0, 8))
 
     output
 
   members: (n, cb) ->
-    @db.matchPrefix "#{@name}:", n, (err, keys) =>
+    @db.range "#{@name}:", "#{@name};", (err, keys) =>
       return cb(err) if err
-      cb null, keys.map (key) => key.substr("#{@name}:".length)
+      cb null, Object.keys(keys).map (key) => key.substr("#{@name}:".length)
 
   total: (cb) ->
     @db.get @summaryKey(), (err, summary) =>
@@ -127,7 +127,7 @@ class ZSet
     @db.get @summaryKey(), (err, summary) =>
       return cb(err) if err
       ret = {}
-      summary.substr(24).split("\x00").forEach (datum) =>
+      summary.substr(24).split("\x01").forEach (datum) =>
         ret[datum.substr(8)] = @numberify(datum.substr(0, 8))
 
       cb null, ret
