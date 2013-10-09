@@ -1,83 +1,90 @@
 assert = require("assert")
 ZSet = require("../index")
-gdbm = require("gdbm")
+kyoto = require("kyoto")
 
 describe "zset", ->
 
-  db = new gdbm.GDBM()
-  db.open("/tmp/test.db", 0, gdbm.GDBM_NEWDB)
+  db = null
+  before (next) ->
+    db = kyoto.open "test.kct", kyoto.OWRITER | kyoto.OCREATE | kyoto.OTRUNCATE, ->
+      next()
+
+  after ->
+    db.closeSync()
 
   describe "basics", ->
-    zset = new ZSet(db, "example")
-    before ->
-      zset.incr("hello")
-      zset.incr("world")
-      zset.incr("hello")
+    zset = null
+    before (next) ->
+      zset = new ZSet(db, "example")
+      zset.incr "hello", (err) ->
+        assert.ifError err
+        zset.incr "world", (err) ->
+          assert.ifError err
+          zset.incr "hello", (err) ->
+            assert.ifError err
+            next()
 
-    it "should track scores", ->
-      assert.equal(zset.score("hello"), 2)
-      assert.equal(zset.score("world"), 1)
+    it "should track scores", (next) ->
+      zset.score "hello", (err, value) ->
+        assert.ifError err
+        assert.equal value, 2
+        zset.score "world", (err, value) ->
+          assert.ifError err
+          assert.equal value, 1
+          next()
 
-    it "should be able to count total", ->
-      assert.equal(zset.total(), 3)
+    it "should be able to count total", (next) ->
+      zset.total (err, total) ->
+        assert.ifError err
+        assert.equal total, 3
+        next()
 
-    it "should be able to count cardinality", ->
-      assert.equal(zset.cardinality(), 2)
+    it "should be able to count cardinality", (next) ->
+      zset.cardinality (err, cardinality) ->
+        assert.ifError err
+        assert.equal cardinality, 2
+        next()
 
-    it "should be able to list members", ->
-      assert.deepEqual(zset.members(), ["hello", "world"])
+    it "should be able to list members", (next) ->
+      zset.members -1, (err, members) ->
+        assert.ifError err
+        assert.deepEqual members, ["hello", "world"]
+        next()
 
-    it "should be able to summarize the top N", ->
-      assert.deepEqual(zset.summary(), {
-        "total": 3,
-        "cardinality": 2,
-        "top": {
-          "hello": 2,
-          "world": 1
-        }
-      })
-
-  describe "edge cases", ->
-
-    it "should include a new member in the topN if there's room", ->
-      zset = new ZSet(db, "gromit")
-      zset.incr("one")
-      zset.incr("one")
-      zset.incr("two")
-
-      assert.deepEqual zset.summary(), {
-        "total": 3,
-        "cardinality": 2,
-        "top": {
-          "one": 2,
-          "two": 1
-        }
-      }
+    it "should be able to summarize the top N", (next) ->
+      zset.top -1, (err, top) ->
+        assert.ifError err
+        assert.deepEqual top,
+          hello: 2
+          world: 1
+        next()
 
   describe "utilized", ->
 
-    zset = new ZSet(db, "example2", 5, 10)
-    before ->
+    zset = null
+    before (next) ->
+      zset = new ZSet(db, "example2", 5, 10)
+      done = 0
       for i in [1..20]
         for j in [0...i]
-          zset.incr(i)
+          zset.incr i, ->
+            done += 1
+            if done == 210
+              next()
 
     it "should track the top N", ->
-      assert.deepEqual(zset.summary(), {
-        total: 210,
-        cardinality: 20,
-        top: {
+      zset.top 5, (err, top) ->
+        assert.ifError err
+        assert.deepEqual top,
           20: 20,
           19: 19,
           18: 18,
           17: 17,
           16: 16
-        }
-      })
 
     it "should track all the members", ->
-      assert.deepEqual(zset.members(), [
-        "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-        "11", "12", "13", "14", "15", "16", "17", "18", "19", "20"
-      ])
-
+      zset.members -1, (err, members) ->
+        assert.ifError err
+        assert.deepEqual members,
+          ["1", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19",
+           "2", "20", "3", "4", "5", "6", "7", "8", "9"]
