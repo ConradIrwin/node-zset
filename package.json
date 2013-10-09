@@ -6,7 +6,8 @@
   "dependencies": {
     "coffee-script": "x.x.x",
     "kyoto": "git+https://github.com/ConradIrwin/node-kyoto",
-    "leveled": "~0.4.4"
+    "leveled": "~0.4.4",
+    "rimraf": "~2.2.2"
   },
   "devDependencies": {
     "mocha": "x.x.x"

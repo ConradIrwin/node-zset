@@ -11,126 +11,113 @@
 # 2. .cardinality()  The number of unique member keys.
 # 3. .topN()         The top <N> members in the set.
 # 3. .members()      The list of members (in the order they were added)
-#
+Q = require 'q'
+
 class ZSet
 
   constructor: (@db, @name, @summarySize=10, @membersPerBucket=500) ->
-    @locked = false
-    @todo = []
+    @inProgress = Q()
 
   incr: (key, _cb) ->
-    cb = (args...) =>
-      @locked = false
-      _cb(args...)
-      if next = @todo.shift()
-        @incr(next[0], next[1]) 
-
-    if @locked
-      return @todo.push([key, cb])
-    else
-      @locked = true
-      @_incr(key, cb)
+    # Ensure there can only be one event in progress at a time
+    @inProgress = @inProgress.then =>
+      @_incr key
 
   _incr: (key, cb) ->
     key = key.toString()
-    @db.get @summaryKey(), (err, summary) =>
-      return cb(err) if err && err != "NotFound: "
-      @db.get @scoreKey(key), (err, score) =>
-        return cb(err) if err && err != "NotFound: "
+    summary = null
+    score = null
+    @get(@summaryKey()).then((result) =>
+      summary = result
+      if summary
+        @get(@scoreKey(key)).then (result) =>
+          score = result 
+    ).then =>
+      score = @numberify score
 
-        score = @numberify score
+      isNew = score == 0
+      newScore = score + 1
 
-        isNew = score == 0
-        newScore = score + 1
+      if !summary # new set!
+        cardinality = 1
+        total = 1
+        topN = 1
+        newSummary = @serializeSummary(total, cardinality, topN, @datum(newScore, key))
 
-        if !summary # new set!
-          cardinality = 1
-          total = 1
-          topN = 1
-          newSummary = @serializeSummary(total, cardinality, topN, @datum(newScore, key))
+      else
+        [total, cardinality, topN, top] = @parseSummary(summary)
+
+        total += 1
+        cardinality += 1 if isNew
+
+        minimum = @numberify(top.substr(0, 8))
+        if newScore < minimum && topN == @summarySize
+          newSummary = @serializeSummary(total, cardinality, topN, top)
 
         else
-          [total, cardinality, topN, top] = @parseSummary(summary)
+          parsed = top.split("\x01")
+          updated = false
 
-          total += 1
-          cardinality += 1 if isNew
+          parsed = parsed.map (datum) =>
+            if key == datum.substr(8)
+              updated = true
+              @datum(newScore, key)
+            else
+              datum
 
-          minimum = @numberify(top.substr(0, 8))
-          if newScore < minimum && topN == @summarySize
-            newSummary = @serializeSummary(total, cardinality, topN, top)
+          parsed.push(@datum(newScore, key)) unless updated
 
-          else
-            parsed = top.split("\x01")
-            updated = false
+          parsed.sort()
+          parsed = parsed.slice(-@summarySize) if parsed.length > @summarySize
+          newSummary = @serializeSummary(total, cardinality, parsed.length, parsed.join("\x01"))
 
-            parsed = parsed.map (datum) =>
-              if key == datum.substr(8)
-                updated = true
-                @datum(newScore, key)
-              else
-                datum
-
-            parsed.push(@datum(newScore, key)) unless updated
-
-            parsed.sort()
-            parsed = parsed.slice(-@summarySize) if parsed.length > @summarySize
-            newSummary = @serializeSummary(total, cardinality, parsed.length, parsed.join("\x01"))
-
-        @db.batch()
-          .put(@summaryKey(), newSummary)
-          .put(@scoreKey(key), @stringify newScore)
-          .write(cb)
+      @write @db.batch()
+        .put(@summaryKey(), newSummary)
+        .put(@scoreKey(key), @stringify newScore)
 
   score: (key, cb) ->
-    @db.get @scoreKey(key), (err, value) =>
-      return cb(err) if err
-      cb null, @numberify value
+    @get(@scoreKey(key)).then @numberify
 
   summary: () ->
-    summary = @db.get(@summaryKey())
-    return {"total": 0, "cardinality": 0, "top": {}} unless summary
-    [total, cardinality, topN, top] = @parseSummary(summary)
+    @get(@summaryKey()).then (summary) =>
+      return {"total": 0, "cardinality": 0, "top": {}} unless summary
+      [total, cardinality, topN, top] = @parseSummary(summary)
 
-    output = {
-      "total": total,
-      "cardinality": cardinality,
-      "top": {}
-    }
+      output = {
+        "total": total,
+        "cardinality": cardinality,
+        "top": {}
+      }
 
-    top.split("\x01").forEach (datum) =>
-      output.top[datum.substr(8)] = @numberify(datum.substr(0, 8))
+      top.split("\x01").forEach (datum) =>
+        output.top[datum.substr(8)] = @numberify(datum.substr(0, 8))
 
-    output
+      output
 
-  members: (n, cb) ->
-    @db.range "#{@name}:", "#{@name};", (err, keys) =>
-      return cb(err) if err
-      cb null, Object.keys(keys).map (key) => key.substr("#{@name}:".length)
+  members: () ->
+    @range("#{@name}:", "#{@name};").then (keys) =>
+      Object.keys(keys).map (key) => key.substr("#{@name}:".length)
 
-  total: (cb) ->
-    @db.get @summaryKey(), (err, summary) =>
-      return cb(err) if err
+  total: () ->
+    @get(@summaryKey()).then (summary) =>
       if summary
-        cb null, @parseTotal(summary)
+        @parseTotal(summary)
       else
-        cb null, 0
+        0
 
-  cardinality: (cb) ->
-    @db.get @summaryKey(), (err, summary) =>
-      return cb(err) if err
+  cardinality: () ->
+    @get(@summaryKey()).then (summary) =>
       if summary
-        cb null, @parseCardinality(summary)
+        @parseCardinality(summary)
       else
-        cb null, 0
+        0
 
-  top: (n, cb) ->
-    @db.get @summaryKey(), (err, summary) =>
-      return cb(err) if err
+  top: () ->
+    @get(@summaryKey()).then (summary) =>
       ret = {}
       summary.substr(24).split("\x01").forEach (datum) =>
         ret[datum.substr(8)] = @numberify(datum.substr(0, 8))
-
-      cb null, ret
+      ret
 
   parseSummary: (summary) ->
     [@parseTotal(summary),
@@ -165,5 +152,18 @@ class ZSet
 
   scoreKey: (key) ->
     "#{@name}:#{key}"
+
+  get: (key) ->
+    Q.nmcall(@db, 'get', key).fail (err) ->
+      if err.toString() == "NotFound: "
+        null
+      else
+        throw err
+
+  write: (batch) ->
+    Q.nmcall(batch, 'write')
+
+  range: (from, to) ->
+    Q.nmcall(@db, 'range', from, to)
 
 module.exports = ZSet
