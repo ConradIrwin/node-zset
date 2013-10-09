@@ -72,7 +72,7 @@ describe "zset", ->
             if done == 210
               next()
 
-    it "should track the top N", ->
+    it "should track the top N", (next) ->
       zset.top 5, (err, top) ->
         assert.ifError err
         assert.deepEqual top,
@@ -81,10 +81,12 @@ describe "zset", ->
           18: 18,
           17: 17,
           16: 16
+        next()
 
-    it "should track all the members", ->
+    it "should track all the members", (next) ->
       zset.members -1, (err, members) ->
         assert.ifError err
         assert.deepEqual members,
           ["1", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19",
            "2", "20", "3", "4", "5", "6", "7", "8", "9"]
+        next()

@@ -15,44 +15,49 @@
 class ZSet
 
   constructor: (@db, @name, @summarySize=10, @membersPerBucket=500) ->
+    @locked = false
+    @todo = []
 
-  incr: (key, cb) ->
+  incr: (key, _cb) ->
+    cb = (args...) =>
+      @locked = false
+      _cb(args...)
+      if next = @todo.shift()
+        @incr(next[0], next[1]) 
+
+    if @locked
+      return @todo.push([key, cb])
+    else
+      @locked = true
+      @_incr(key, cb)
+
+  _incr: (key, cb) ->
     key = key.toString()
-    @db.fetch @summaryKey(), (summary) =>
-      @score key, (score) =>
+    @db.getBulk [@summaryKey(), @scoreKey(key)], (err, result) =>
+      return cb(err) if err
 
-        isNew = score == 0
 
-        newScore = score + 1
+      summary = result[@summaryKey()]
+      score = @numberify result[@scoreKey(key)]
 
-        @db.store(@scoreKey(key), @stringify(newScore))
+      isNew = score == 0
+      newScore = score + 1
 
-        if !summary # new set!
-          cardinality = 1
-          total = 1
-          topN = 1
+      if !summary # new set!
+        cardinality = 1
+        total = 1
+        topN = 1
+        newSummary = @serializeSummary(total, cardinality, topN, @datum(newScore, key))
 
-          @db.store(@membersKey(cardinality), key)
-          @db.store(@summaryKey(), @serializeSummary(total, cardinality, topN, @datum(newScore, key)), cb)
-          return
-
+      else
         [total, cardinality, topN, top] = @parseSummary(summary)
 
         total += 1
-        if isNew
-          cardinality += 1
-          @db.fetch @membersKey(cardinality), (members) =>
-            members = @db.fetch(@membersKey(cardinality))
-            if members
-              members += "\x00#{key}"
-            else
-              members = key
-
-            @db.store(@membersKey(cardinality), members)
+        cardinality += 1 if isNew
 
         minimum = @numberify(top.substr(0, 8))
         if newScore < minimum && topN == @summarySize
-          @db.store(@summaryKey(), @serializeSummary(total, cardinality, topN, top), cb)
+          newSummary = @serializeSummary(total, cardinality, topN, top)
 
         else
           parsed = top.split("\x00")
@@ -69,14 +74,20 @@ class ZSet
 
           parsed.sort()
           parsed = parsed.slice(-@summarySize) if parsed.length > @summarySize
-          @db.store(@summaryKey(), @serializeSummary(total, cardinality, parsed.length, parsed.join("\x00")), cb)
+          newSummary = @serializeSummary(total, cardinality, parsed.length, parsed.join("\x00"))
+
+      toSet = {}
+      toSet[@summaryKey()] = newSummary
+      toSet[@scoreKey(key)] = @stringify newScore
+      @db.setBulk toSet, cb
 
   score: (key, cb) ->
-    @db.fetch @scoreKey(key), (value) =>
-      cb @numberify value
+    @db.get @scoreKey(key), (err, value) =>
+      return cb(err) if err
+      cb null, @numberify value
 
   summary: () ->
-    summary = @db.fetch(@summaryKey())
+    summary = @db.get(@summaryKey())
     return {"total": 0, "cardinality": 0, "top": {}} unless summary
     [total, cardinality, topN, top] = @parseSummary(summary)
 
@@ -91,27 +102,35 @@ class ZSet
 
     output
 
-  members: () ->
-    members = []
-    i = 1
-    while more = @db.fetch(@membersKey(i))
-      members = members.concat(more.split("\x00"))
-      i += @membersPerBucket
+  members: (n, cb) ->
+    @db.matchPrefix "#{@name}:", n, (err, keys) =>
+      return cb(err) if err
+      cb null, keys.map (key) => key.substr("#{@name}:".length)
 
-    members
+  total: (cb) ->
+    @db.get @summaryKey(), (err, summary) =>
+      return cb(err) if err
+      if summary
+        cb null, @parseTotal(summary)
+      else
+        cb null, 0
 
-  total: () ->
-    summary = @db.fetch(@summaryKey())
-    return 0 unless summary
-    @parseTotal(summary)
+  cardinality: (cb) ->
+    @db.get @summaryKey(), (err, summary) =>
+      return cb(err) if err
+      if summary
+        cb null, @parseCardinality(summary)
+      else
+        cb null, 0
 
-  cardinality: () ->
-    summary = @db.fetch(@summaryKey())
-    return 0 unless summary
-    @parseCardinality(summary)
+  top: (n, cb) ->
+    @db.get @summaryKey(), (err, summary) =>
+      return cb(err) if err
+      ret = {}
+      summary.substr(24).split("\x00").forEach (datum) =>
+        ret[datum.substr(8)] = @numberify(datum.substr(0, 8))
 
-  top: () ->
-    @summary().top
+      cb null, ret
 
   parseSummary: (summary) ->
     [@parseTotal(summary),
@@ -146,8 +165,5 @@ class ZSet
 
   scoreKey: (key) ->
     "#{@name}:#{key}"
-
-  membersKey: (cardinality) ->
-    "#{@name}.#{Math.floor(cardinality / @membersPerBucket)}"
 
 module.exports = ZSet

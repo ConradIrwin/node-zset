@@ -1,17 +1,9 @@
 kyoto = require 'kyoto'
 ZSet = require './index'
 
-k = kyoto.open "/tmp/zset.kct", kyoto.OWRITER | kyoto.OCREATE, ->
+k = kyoto.open "/tmp/zset.kct", kyoto.OWRITER | kyoto.OCREATE | kyoto.OTRUNCATE, ->
 
   process.on 'exit', -> k.closeSync()
-
-  db = {
-    fetch: (key, cb) ->
-      k.get key, cb
-
-    store: (key, value, cb) ->
-      k.set(key, value, cb)
-  }
 
   rand = (n) ->
     Math.floor Math.random() * n
