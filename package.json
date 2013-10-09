@@ -1,6 +1,6 @@
 {
   "name": "zset",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Disk backed semi-sorted sets (using Kyoto)",
   "repository": "https://github.com/ConradIrwin/zset",
   "dependencies": {

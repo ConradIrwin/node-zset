@@ -18,12 +18,12 @@ class ZSet
   constructor: (@db, @name, @summarySize=10, @membersPerBucket=500) ->
     @inProgress = Q()
 
-  incr: (key, _cb) ->
+  incr: (key, n=1) ->
     # Ensure there can only be one event in progress at a time
     @inProgress = @inProgress.then =>
-      @_incr key
+      @_incr key, n
 
-  _incr: (key, cb) ->
+  _incr: (key, n) ->
     key = key.toString()
     summary = null
     score = null
@@ -36,18 +36,18 @@ class ZSet
       score = @numberify score
 
       isNew = score == 0
-      newScore = score + 1
+      newScore = score + n
 
       if !summary # new set!
         cardinality = 1
-        total = 1
+        total = n
         topN = 1
         newSummary = @serializeSummary(total, cardinality, topN, @datum(newScore, key))
 
       else
         [total, cardinality, topN, top] = @parseSummary(summary)
 
-        total += 1
+        total += n
         cardinality += 1 if isNew
 
         minimum = @numberify(top.substr(0, 8))
