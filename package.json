@@ -1,15 +1,14 @@
 {
   "name": "zset",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Disk backed semi-sorted sets (using Kyoto)",
   "repository": "https://github.com/ConradIrwin/zset",
   "dependencies": {
-    "coffee-script": "x.x.x",
-    "kyoto": "git+https://github.com/ConradIrwin/node-kyoto",
-    "leveled": "~0.4.4",
-    "rimraf": "~2.2.2"
+    "coffee-script": "x.x.x"
   },
   "devDependencies": {
+    "leveled": "~0.4.4",
+    "rimraf": "~2.2.2",
     "mocha": "x.x.x"
   },
   "scripts": {
